@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Url Forwarder</title>
+
+
+</head>
+<body>
+<button type="button" data-process>Process</button>
+
+<div>Status: <span data-status>Click Process</span></div>
+
+
+    <script type="text/javascript">
+function processTask() {
+    return function () {
+        function sha512(text) {
+            return new Promise((resolve, reject) => {
+                let buffer = (new TextEncoder).encode(text);
+
+                crypto.subtle.digest('SHA-512', buffer.buffer).then(result => {
+                    resolve(Array.from(new Uint8Array(result)).map(
+                        c => c.toString(16).padStart(2, '0')
+                    ).join(''));
+                }, reject);
+            });
+        }
+
+        addEventListener('message', async (event) => {
+            let data = event.data.data;
+            let difficulty = event.data.difficulty;
+
+            let hash;
+            let nonce = 0;
+            do {
+                hash = await sha512(data + nonce++);
+                console.log(hash, data, nonce);
+            } while (hash.toString() !== difficulty)
+
+            postMessage({
+                hash,
+                data,
+                difficulty,
+                nonce: nonce - 1
+            });
+        });
+    }.toString();
+}
+
+function process(data, difficulty) {
+    return new Promise((resolve, reject) => {
+        let webWorkerURL = URL.createObjectURL(new Blob([
+            '(', processTask(), ')()'
+        ], { type: 'application/javascript' }));
+
+        // Create WebWorker
+        let worker = new Worker(webWorkerURL);
+
+        worker.onmessage = (event) => {
+            worker.terminate();
+            resolve(event.data);
+        };
+
+        worker.onerror = (event) => {
+            worker.terminate();
+            reject();
+        };
+
+        // Execute WebWorker Task
+        worker.postMessage({
+            data,
+            difficulty
+        });
+
+        // Destroy URL Object
+        URL.revokeObjectURL(webWorkerURL);
+    });
+}
+
+const status = document.querySelector('[data-status]');
+document.querySelector('[data-process]').addEventListener('click', () => {
+	status.innerText = 'Calculating, please wait...'
+
+  let timeStart = Date.now();
+  let hash = process('today', "{{ hash }}").then(
+  	response => {
+    	status.innerHTML = `Done in ${Date.now()-timeStart}ms<br />Result: ${response.hash}<br />Nonce: ${response.nonce}`;
+        // redirect to current url / nonce
+        window.location = window.location.href + '/' + response.nonce;
+		},
+    err => status.innerText = 'An error occured'
+  );
+});
+    </script>
+</body>
+</html>
